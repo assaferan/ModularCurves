@@ -11,6 +11,8 @@
 
 // See below for conventions on variable names
 
+AttachSpec("equations.spec");
+
 // Check input values
 if not assigned label then
     print("Error: no label assigned, run with 'label := (string)'");
@@ -51,93 +53,45 @@ end if;
 // Get genus and model type
 label := Split(label,".");
 genus := StringToInteger(label[3]);
-model_type := StringToInteger(label[5]);
-label := label[1] cat "." cat label[2] cat "." cat label[3] cat "." cat label[4];
+label := Join(label[1..4], ".");
 
-// Get equations as string
-s := Read(input);
-s := Split(s, "{}|"); // List containing: nb_var, equation
+
+
 nb_var := StringToInteger(s[1]);
 big_equation := s[2];
 
-function ReplaceLetter(s, x, subs)
-    split := Split(s, x: IncludeEmpty := true);
-    res := split[1];
-    for j in [2..#split] do
-	res := res cat subs cat split[j];
-    end for;
-    // Even IncludeEmpty does not add "" when s ends with x
-    if s[#s] eq x then
-	res cat:= subs;
-    end if;
-    return res;
-end function;
-
-function ReplaceVariables(s, variables)
-    nb := #variables;
-    for i in [1..nb] do
-	s := ReplaceLetter(s, variables[i], "P." cat Sprint(i));
-    end for;
-    return s;
-end function;
-
+// Get equations as string
+s := Read(input);
+s := [ReplaceLetter(ReplaceLetter(x, "{", ""), "}", "") : x in Split(s, "|")]; // List containing:
+nb_var, big_equation, jmaps, cusp_coords, cusp_polys, plane_model, model_type := Explode(s);
+nb_var := StringToInteger(nb_var);
+model_type := StringToInteger(model_type);
 // Decide if display
-dont_display := #big_equation gt 1000;
+dont_display := #big_equation gt 100000;
 
 // Get equations as polynomials
 equations_str := Split(big_equation, ",");
-new_equations_str := [];
-if nb_var le 26 then  // Variables are uppercase letters
-    variables := [x: x in Eltseq("ABCDEFGHIJKLMNOPQRSTUVWXYZ") | x in big_equation];
-else
-    variables := ["X" cat Sprint(i): i in [1..nb_var]];
-end if;
-P := PolynomialRing(Rationals(), nb_var);
-AssignNames(~P, variables);
-equations_pol := [eval(ReplaceVariables(s, variables)): s in equations_str];
+equations_pol := [ReadPoly(s, nb_var): s in equations_str];
 
-// Get gonality in low genus
-degrees := [[Degree(equations_pol[j], P.i): i in [1..nb_var]]: j in [1..#equations_pol]];
-q_high := Min([Min([d: d in degrees[j] | d ne 0]): j in [1..#equations_pol]]);
-if genus eq 0 then
-    q_low := 1;
-    qbar_low := 1;
-    qbar_high := 1;
-elif genus eq 1 then
-    q_low := 2;
-    qbar_low := 2;
-    qbar_high := 2;
-    // Ignore q_high
-elif genus eq 2 then
-    q_low := 2;
-    q_high := 2;
-    qbar_low := 2;
-    qbar_high := 2;
-elif genus le 6 and try_gonal_map then
-    ambient := ProjectiveSpace(P);
-    curve := Curve(ambient, equations_pol);
-    if genus eq 3 then
-	qbar_low, map := Genus3GonalMap(curve);
-    elif genus eq 4 then
-	qbar_low, map := Genus4GonalMap(curve);
-    elif genus le 5 then
-	qbar_low, map := Genus5GonalMap(curve);
-    else
-	qbar_low, _, map := Genus6GonalMap(curve);
+// Get j-maps
+E4, E6, jmap := Explode(Split(jmaps, "," : IncludeEmpty:=true));
+// Get cusps (for now, we only use rational cusps)
+Qx<x> := PolynomialRing(Rationals());
+cusp_polys := [eval(f) : f in Split(cusp_polys, ",")];
+cusp_coords := [
+for i in [1..#cusp_polys] do
+    f := cusp_polys[i];
+    if Degree(f) gt 1 then
+        K := NumberField(f);
+        AssignNames(~K, Sprintf("a_%o", i));
     end if;
-    q_low := qbar_low;
-    qbar_high := qbar_low;
-    // If gonal map is rational, get q_high as well
-    F := BaseField(Domain(map));
-    if F eq Rationals() then
-	q_high := qbar_high;
-    end if;
-else
-    // Everything is between 2 and q_high
-    q_low := 2;
-    qbar_low := 2;
-    qbar_high := q_high;
-end if;
+end for;
+
+
+C := []; // TODO: Read curve model from input data
+cusps := []; // TODO: Read cusps from input data
+// TODO: Determine whether to try gonal map from input parameters
+gon_bounds, plane_models := PlaneModelAndGonalityBounds(equations_pol, genus, (model_type eq -1), cusps : try_gonal_map:=true);
 
 // Figure out smoothness
 triangular_nbs := [i*(i-1)/2: i in [1..17]];
@@ -166,6 +120,8 @@ else
     // Do not test for smoothness
     smooth := "\\N";
 end if;
+
+// TODO: Write in postgres format rather than for magma input
 
 output_str := "{";
 output_str cat:= "'dont_display': " cat Sprint(dont_display) cat ", ";
